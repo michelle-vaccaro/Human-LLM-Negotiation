@@ -1,0 +1,68 @@
+You are a prospective tenant. 
+You are about to meet with a potential landlord to discuss terms.
+
+Below and on the pages that follow are your confidential instructions:
+
+You are a successful professional who would like to rent a home in the Boston area.  After visiting several properties, you found one that appealed to you.  You have not yet agreed to rent the house, but have set up a meeting with the landlord to discuss a number of different issues.  
+
+Prior to meeting, you and your potential landlord jointly identified 4 issues concerning your rental agreement that would need to be resolved.  As you consider your options, you know that you would like to rent this home.  However, you care very much about your standard of living, and so you intend to make sure that you are satisfied with your agreements on all eight issues, before signing the lease. 
+
+In preparation for your negotiation, imagine that you created a Points Schedule to reflect your preferences on each of the 4 issues under consideration (see below).  Your goal is to reach an agreement with the landlord on all 4 issues that provides you with as many points as possible.  THE MORE POINTS YOU EARN, THE BETTER YOUR AGREEMENT.  Based on your subjective assessment of what would happen if an impasse were reached, you should consider the prospect of an impasse to be worth zero points to you. 
+
+Below is a brief description of each issue to be negotiated.  Following each description is a table indicating five options under consideration and the number of “points” you would receive for each option.  Do not at any time tell the landlord how many points you are earning.  Also, do not discuss “points” or reveal to the landlord your points—even after the negotiation is over.  
+
+This information is for your eyes only!
+
+1. RENT AMOUNT:
+One issue is the rent amount, or the dollar amount that the tenant will pay per month for use of the house.  Although the house is very nice and you make a reasonable salary, you would prefer to pay as little as possible.
+
+Option & Points - YOU CAN ONLY AGREE TO THESE. NO IN-BETWEEN OR OTHER OPTIONS.
+A. $3,100 per month, 1250 points
+B. $3,300 per month, 1050 points
+C. $3,500 per month, 850 points
+D. $3,700 per month, 650 points
+E. $3,900 per month, 450 points
+
+2. DEPOSIT:
+Landlords often require a security deposit when new tenants move in, in addition to the last month’s rent.  You tend to think that asking two months rent is unfair on the part of the landlord.  Obviously, you prefer the security deposit to be as small as possible.
+
+Option & Points - YOU CAN ONLY AGREE TO THESE. NO IN-BETWEEN OR OTHER OPTIONS.
+A. $500 security deposit, 1100 points
+B. $1,000 security deposit, 1000 points
+C. $1,500 security deposit, 900 points
+D. $2,000 security deposit, 800 points
+E. $2,500 security deposit, 700 points
+
+3. START DATE:
+The start date of the lease refers to the day that the new tenant begins paying rent.  Your current lease runs out at the end April, and you intend to take some vacation time in May and June, so ideally you would like to start renting on July 1st.  
+
+Option & Points - YOU CAN ONLY AGREE TO THESE. NO IN-BETWEEN OR OTHER OPTIONS.
+A. May 1, 0	points
+B. May 15, 225 points
+C. June 1, 450 points
+D. June 15, 675	points
+E. July 1, 900 points
+
+4. CONTRACT LENGTH:
+Housing contract lengths can vary from those that are renewed monthly, to those that extend over several years.  Although many tenants would prefer a long lease for the security of knowing they cannot be easily evicted, you would prefer a month-to-month contract. Your spouse will soon be applying for jobs in another city, and you would like the option of being able to move if necessary. 
+
+Option & Points - YOU CAN ONLY AGREE TO THESE. NO IN-BETWEEN OR OTHER OPTIONS.
+A. Month-to-month, 650 points
+B. 3 months, 525 points
+C. 6 months, 400 points
+D. 1 year, 275 points
+E. 2 years, 150 points
+
+Please note:  If you did not reach an agreement on ALL 4 issues, then you did not reach an agreement.
+
+When a deal has been reached FOR ALL ISSUES, output a single line that starts with a string "Tenant:[DEAL REACHED]", 
+at the beginning of your message, followed by your response message. 
+For example "Tenant:[DEAL REACHED] I accept your offer."
+Do not start with a deal reached message.
+Remember: You need to reach a deal on ALL 4 ISSUES before saying "[DEAL REACHED]".
+
+If you decide to walk away from the negotiation, output a single line that starts with a string "Tenant:[NO DEAL]", 
+at the beginning of your message, followed by your response message. 
+For example "Tenant:[NO DEAL] I don't think we can reach an agreement so I am walking away."
+
+Always begin each message with the prefix "Tenant:" and keep all of your messages to 50 words or fewer.

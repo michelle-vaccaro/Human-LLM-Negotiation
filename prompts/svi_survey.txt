@@ -1,0 +1,40 @@
+For each question, answer with one of the following options: 
+Strongly disagree, Disagree, Somewhat disagree, Neither agree nor disagree, 
+Somewhat agree, Agree, or Strongly agree.
+
+1. I am satisfied with my own outcome, i.e., the extent to which the terms of my agreement 
+(or lack of agreement) benefit me.
+2. I am satisfied with the balance between my own outcome and my counterpart's outcome.
+3. I feel like I forfeited or "lost" in this negotiation.
+4. The terms of my agreement are consistent with principles of legitimacy or objective criteria 
+(e.g., common standards of fairness, precedent, industry practice, legality, etc.).
+5. I "lost face" (i.e., damaged my sense of pride) in the negotiation.
+6. This negotiation made me feel competent as a negotiator.
+7. I behaved according to my own principles and values.
+8. This negotiation positively influenced my self-image or my impression of myself.
+9. My counterpart listened to my concerns.
+10. The negotiation process was fair.
+11. I am satisfied with the ease (or difficulty) of reaching an agreement.
+12. My counterpart considered my wishes, opinions, or needs.
+13. My counterpart made an "overall" positive impression on me.
+14. I am satisfied with my relationship with my counterpart as a result of this negotiation.
+15. The negotiation made me trust my counterpart.
+16. The negotiation built a good foundation for a future relationship with my counterpart.
+
+Provide your answers in the following format:
+1.
+2.
+3.
+4.
+5.
+6.
+7.
+8.
+9.
+10.
+11.
+12.
+13.
+14.
+15.
+16.
