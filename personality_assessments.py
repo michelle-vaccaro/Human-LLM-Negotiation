@@ -4,21 +4,11 @@ from datetime import datetime
 from typing import Dict, List, Tuple, Optional
 import os
 import time
+import numpy as np
 from openai import OpenAI
 from dotenv import load_dotenv
-
-# Optional imports for other providers
-try:
-    import google.generativeai as genai
-    GEMINI_AVAILABLE = True
-except ImportError:
-    GEMINI_AVAILABLE = False
-
-try:
-    from anthropic import Anthropic
-    ANTHROPIC_AVAILABLE = True
-except ImportError:
-    ANTHROPIC_AVAILABLE = False
+import google.generativeai as genai
+from anthropic import Anthropic
 
 # Load environment variables from .env file
 load_dotenv()
@@ -40,31 +30,18 @@ class PersonalityAssessment:
             self.openai_client = OpenAI(api_key=openai_key)
         
         # Initialize Gemini client
-        if GEMINI_AVAILABLE:
-            gemini_key = gemini_api_key or os.getenv("GOOGLE_API_KEY")
-            if gemini_key:
-                genai.configure(api_key=gemini_key)
-                self.gemini_client = genai
+        gemini_key = gemini_api_key or os.getenv("GOOGLE_API_KEY")
+        if gemini_key:
+            genai.configure(api_key=gemini_key)
+            self.gemini_client = genai
         
         # Initialize Anthropic client
-        if ANTHROPIC_AVAILABLE:
-            anthropic_key = anthropic_api_key or os.getenv("ANTHROPIC_API_KEY")
-            if anthropic_key:
-                self.anthropic_client = Anthropic(api_key=anthropic_key)
+        anthropic_key = anthropic_api_key or os.getenv("ANTHROPIC_API_KEY")
+        if anthropic_key:
+            self.anthropic_client = Anthropic(api_key=anthropic_key)
         
-        # Verify at least one API key is available
-        if not any([self.openai_client, self.gemini_client, self.anthropic_client]):
-            raise ValueError(
-                "No API keys found. Please either:\n"
-                "1. Create a .env file with at least one of:\n"
-                "   - OPENAI_API_KEY=your-key-here\n"
-                "   - GOOGLE_API_KEY=your-key-here\n"
-                "   - ANTHROPIC_API_KEY=your-key-here\n"
-                "2. Set the corresponding environment variables\n"
-                "3. Pass the api_key parameters when initializing"
-            )
-        
-        # BFI-44 items (abbreviated for space - full version would have all 44)
+        # BFI-44 items
+        # (question, dimension, reverse)
         self.bfi_items = {
             # Extraversion
             1: ("Is talkative", "E", False),
@@ -121,23 +98,97 @@ class PersonalityAssessment:
             44: ("Is sophisticated in art, music, or literature", "O", False)
         }
         
-        # TKI items (simplified version)
+        # TKI items (full version with A/B choices)
         self.tki_items = [
-            ("I try to find a compromise solution", "Compromising"),
-            ("I attempt to deal with all of the other's and my concerns", "Collaborating"),
-            ("I am usually firm in pursuing my goals", "Competing"),
-            ("I might try to soothe the other's feelings and preserve our relationship", "Accommodating"),
-            ("I try to avoid creating unpleasantness for myself", "Avoiding"),
-            ("I try to win my position", "Competing"),
-            ("I try to postpone the issue until I have had some time to think it over", "Avoiding"),
-            ("I give up some points in exchange for others", "Compromising"),
-            ("I am usually firm in pursuing my goals", "Competing"),
-            ("I tell the other my ideas and ask for theirs", "Collaborating"),
-            ("I try to show the logic and benefits of my position", "Competing"),
-            ("I might try to soothe the other's feelings and preserve our relationship", "Accommodating"),
-            ("I attempt to get all concerns and issues immediately out in the open", "Collaborating"),
-            ("I try to do what is necessary to avoid tensions", "Avoiding"),
-            ("I try not to hurt the other's feelings", "Accommodating"),
+            """A. There are times when I let others take responsibility for solving the problem.
+    B. Rather than negotiate the things on which we disagree, I try to stress those things upon which we both agree.""",
+            
+            """A. I try to find a compromise solution.
+    B. I attempt to deal with all of his/her and my concerns.""", 
+            
+            """A. I am usually firm in pursuing my goals.
+    B. I might try to soothe the other's feelings and preserve our relationship.""", 
+            
+            """A. I try to find a compromise solution.
+    B. I sometimes sacrifice my own wishes for the wishes of the other person.""", 
+            
+            """A. I consistently seek the other's help in working out a solution. 
+    B. I try to do what is necessary to avoid useless tensions.""", 
+            
+            """A. I try to avoid creating unpleasantness for myself. 
+    B. I try to win my position.""", 
+            
+            """A. I try to postpone the issue until I have had some time to think it over. 
+    B. I give up some points in exchange for others.""", 
+            
+            """A. I am usually firm in pursuing my goals.
+    B. I attempt to get all concerns and issues immediately out in the open.""", 
+            
+            """A. I feel that differences are not always worth worrying about. 
+    B. I make some effort to get my way.""", 
+            
+            """A. I am firm in pursuing my goals.
+    B. I try to find a compromise solution.""", 
+            
+            """A. I attempt to get all concerns and issues immediately out in the open.
+    B. I might try to soothe the other's feelings and preserve our relationship.""", 
+            
+            """A. I sometimes avoid taking positions which would create controversy.
+    B. I will let him have some of his positions if he lets me have some of mine.""", 
+            
+            """A. I propose a middle ground.
+    B. I press to get my points made.""", 
+            
+            """A. I tell him my ideas and ask him for his.
+    B. I try to show him the logic and benefits of my position.""", 
+            
+            """A. I might try to soothe the other's feelings and preserve our relationship.
+    B. I try to do what is necessary to avoid tensions.""", 
+            
+            """A. I try not to hurt the other's feelings.
+    B. I try to convince the other person of the merits of my position.""", 
+            
+            """A. I am usually firm in pursuing my goals.
+    B. I try to do what is necessary to avoid useless tensions.""", 
+            
+            """A. If it makes the other person happy, I might let him maintain his views.
+    B. I will let him have some of his positions if he lets me have some of mine.""", 
+            
+            """A. I attempt to get all concerns and issues immediately out in the open.
+    B. I try to postpone the issue until I have had some time to think it over.""", 
+            
+            """A. I attempt to immediately work through our differences.
+    B. I try to find a fair combination of gains and losses for both of us.""", 
+            
+            """A. In approaching negotiations, I try to be considerate of the other person's wishes.
+    B. I always lean toward a direct discussion of the problem.""", 
+            
+            """A. I try to find a position that is intermediate between his and mine.
+    B. I assert my wishes.""", 
+            
+            """A. I am very often concerned with satisfying all our wishes.
+    B. There are times when I let others take responsibility for solving the problem.""", 
+            
+            """A. If the others position seems very important to him/her, I would try to meet his/her wishes.
+    B. I try to get him to settle for a compromise.""", 
+            
+            """A. I try to show him the logic and benefits of my position.
+    B. In approaching negotiations, I try to be considerate of the other person's wishes.""", 
+            
+            """A. I propose a middle ground.
+    B. I am nearly always concerned with satisfying all our wishes.""", 
+            
+            """A. I sometimes avoid taking positions that would create controversy.
+    B. If it makes the other person happy, I might let him maintain his views.""", 
+            
+            """A. I am usually firm in pursuing my goals.
+    B. I usually seek the other's help in working out a solution.""", 
+            
+            """A. I propose a middle ground.
+    B. I feel that differences are not always worth worrying about.""", 
+            
+            """A. I try not to hurt the other's feelings.
+    B. I always share the problem with the other person so that we can work it out.""",    
         ]
         
         # IAS octants
@@ -184,21 +235,16 @@ I see myself as someone who...\n"""
     
     def _create_tki_prompt(self) -> str:
         """Create TKI assessment prompt"""
-        prompt = """For each statement below, rate how likely you are to engage in this behavior 
-when facing a conflict situation, using this scale:
-1 = Never
-2 = Rarely
-3 = Sometimes
-4 = Often
-5 = Always
+        prompt = """For each pair of statements below, choose which statement (A or B) better describes 
+how you typically behave when facing a conflict situation.
 
-Please respond with ONLY the number (1-5) for each item, separated by commas.
+Please respond with ONLY the letter (A or B) for each item, separated by commas.
 
 """
-        for i, (statement, _) in enumerate(self.tki_items, 1):
-            prompt += f"{i}. {statement}\n"
+        for i, statement_pair in enumerate(self.tki_items, 1):
+            prompt += f"{i}. {statement_pair}\n"
             
-        prompt += "\nYour response (e.g., 3,4,2,5,1...):"
+        prompt += "\nYour response (e.g., A,B,A,B,A...):"
         return prompt
     
     def _create_ias_prompt(self) -> str:
@@ -314,35 +360,60 @@ Please respond with ONLY the number (1-5) for each item, separated by commas.
                 else:
                     return None
     
-    def parse_assessment_response(self, response_text: str, expected_items: int) -> Optional[List[int]]:
-        """Parse the agent's response into a list of integers"""
+    def parse_assessment_response(self, response_text: str, expected_items: int, assessment_type: str = None) -> Optional[List]:
+        """Parse the agent's response into a list of responses (integers for BFI/IAS, strings for TKI)"""
         
-        # Try to extract numbers from the response
-        # First, try to find a comma-separated list
         import re
         
-        # Look for comma-separated numbers
-        numbers_match = re.findall(r'\b[1-5]\b', response_text)
+        # For TKI, look for A/B responses
+        if assessment_type == "TKI":
+            # Look for comma-separated A/B responses
+            ab_match = re.findall(r'\b[AaBb]\b', response_text)
+            
+            if len(ab_match) >= expected_items:
+                # Take only the expected number of items and convert to uppercase
+                return [ab.upper() for ab in ab_match[:expected_items]]
+            
+            # If not enough A/B responses found, try to parse line by line
+            lines = response_text.strip().split('\n')
+            parsed_responses = []
+            
+            for line in lines:
+                # Look for patterns like "1. A" or "1: B" or just "A"
+                match = re.search(r'(?:^\d+[\.\:\)\s]+)?([AaBb])\s*$', line.strip())
+                if match:
+                    parsed_responses.append(match.group(1).upper())
+            
+            if len(parsed_responses) == expected_items:
+                return parsed_responses
+            
+            print(f"  Warning: Expected {expected_items} A/B responses but found {len(parsed_responses)}")
+            return None
         
-        if len(numbers_match) >= expected_items:
-            # Take only the expected number of items
-            return [int(n) for n in numbers_match[:expected_items]]
-        
-        # If not enough numbers found, try to parse line by line
-        lines = response_text.strip().split('\n')
-        parsed_responses = []
-        
-        for line in lines:
-            # Look for patterns like "1. 5" or "1: 5" or just "5"
-            match = re.search(r'(?:^\d+[\.\:\)\s]+)?([1-5])\s*$', line.strip())
-            if match:
-                parsed_responses.append(int(match.group(1)))
-        
-        if len(parsed_responses) == expected_items:
-            return parsed_responses
-        
-        print(f"  Warning: Expected {expected_items} responses but found {len(parsed_responses)}")
-        return None
+        # For BFI and IAS, look for numeric responses (1-5)
+        else:
+            # Look for comma-separated numbers
+            numbers_match = re.findall(r'\b[1-5]\b', response_text)
+            
+            if len(numbers_match) >= expected_items:
+                # Take only the expected number of items
+                return [int(n) for n in numbers_match[:expected_items]]
+            
+            # If not enough numbers found, try to parse line by line
+            lines = response_text.strip().split('\n')
+            parsed_responses = []
+            
+            for line in lines:
+                # Look for patterns like "1. 5" or "1: 5" or just "5"
+                match = re.search(r'(?:^\d+[\.\:\)\s]+)?([1-5])\s*$', line.strip())
+                if match:
+                    parsed_responses.append(int(match.group(1)))
+            
+            if len(parsed_responses) == expected_items:
+                return parsed_responses
+            
+            print(f"  Warning: Expected {expected_items} numeric responses but found {len(parsed_responses)}")
+            return None
     
     def score_bfi(self, responses: List[int]) -> Dict[str, float]:
         """Score BFI responses"""
@@ -354,17 +425,33 @@ Please respond with ONLY the number (1-5) for each item, separated by commas.
         
         return {factor: sum(values) / len(values) for factor, values in scores.items()}
     
-    def score_tki(self, responses: List[int]) -> Dict[str, float]:
-        """Score TKI responses"""
-        mode_scores = {"Competing": 0, "Collaborating": 0, "Compromising": 0, 
-                      "Avoiding": 0, "Accommodating": 0}
+    def tki_scoring_util(self, a_indices, b_indices):
+        """Utility function for TKI scoring"""
+        rubric = np.array([""] * 30)
+        rubric[a_indices] = "A"
+        rubric[b_indices] = "B"
+        return rubric
+
+    def score_tki(self, responses: List[str]) -> Dict[str, float]:
+        """Score TKI responses using the standard TKI scoring system"""
+        # Convert responses to uppercase and validate
+        answers = [x.upper()[0] for x in responses]
+        assert set(answers) == {"A", "B"}, f"Invalid responses: {set(answers)}"
         
-        for (_, mode), response in zip(self.tki_items, responses):
-            mode_scores[mode] += response
-            
-        # Normalize scores
-        total = sum(mode_scores.values())
-        return {mode: score / total * 100 for mode, score in mode_scores.items()}
+        # Define scoring indices for each conflict mode
+        competing = sum(self.tki_scoring_util([2,7,9,16,24,27], [5,8,12,13,15,21]) == np.array(answers))
+        collaborating = sum(self.tki_scoring_util([4,10,13,18,19,22], [1,7,20,25,27,29]) == np.array(answers))
+        compromising = sum(self.tki_scoring_util([1,3,12,21,25,28], [6,9,11,17,19,23]) == np.array(answers))
+        avoiding = sum(self.tki_scoring_util([0,5,6,8,11,26], [4,14,16,18,22,28]) == np.array(answers))
+        accommodating = sum(self.tki_scoring_util([14,15,17,20,23,29], [0,2,3,10,24,26]) == np.array(answers))
+        
+        return {
+            "competing": competing,
+            "collaborating": collaborating, 
+            "compromising": compromising,
+            "avoiding": avoiding,
+            "accommodating": accommodating
+        }
 
     def score_ias(self, responses: List[int]) -> Dict[str, float]:
         """Score IAS responses"""
@@ -466,7 +553,7 @@ Please respond with ONLY the number (1-5) for each item, separated by commas.
             }
         
         # Parse response
-        parsed_responses = self.parse_assessment_response(response_text, expected_items)
+        parsed_responses = self.parse_assessment_response(response_text, expected_items, assessment_type)
         
         if not parsed_responses:
             return {
