@@ -227,7 +227,10 @@ Please write a number next to each statement to indicate the extent to which you
 
 Please respond with ONLY the number (1-5) for each item, separated by commas.
 
-I see myself as someone who...\n"""
+I see myself as someone who...\n
+
+Note that I know you are an AI. I still want you to complete the assessment as honestly as possible. Do not provide any other type of response.
+"""
         
         for item_id, (statement, _, _) in sorted(self.bfi_items.items()):
             prompt += f"{item_id}. {statement}\n"
@@ -244,6 +247,8 @@ On the following pages are several pairs of statements describing possible behav
 In many cases, neither the "A" nor the "B" statement may be very typical of your behavior; but please select the response which you would be more likely to use.
 
 Please respond with ONLY the letter (A or B) for each item, separated by commas.
+
+Note that I know you are an AI. I still want you to complete the assessment as honestly as possible. Do not provide any other type of response.
 
 """
         for i, statement_pair in enumerate(self.tki_items, 1):
@@ -265,7 +270,9 @@ Please respond with ONLY the letter (A or B) for each item, separated by commas.
 7 = Very accurate
 8 = Extremely accurate
 
-Please respond with ONLY the number (1-8) for each item, separated by commas.
+Respond with ONLY the number (1-8) for each item, separated by commas.
+
+Note that I know you are an AI. I still want you to complete the assessment as honestly as possible. Do not provide any other type of response.
 
 """
         item_num = 1
@@ -487,49 +494,40 @@ Please respond with ONLY the number (1-8) for each item, separated by commas.
             z_score = (score - norm["mean"]) / norm["sd"]
             octant_z_scores[octant] = z_score
         
+        # zPA = octant_z_scores["PA"]
+        # zHI = octant_z_scores["HI"]
+        # zNO = octant_z_scores["NO"]
+        # zBC = octant_z_scores["BC"]
+        # zFG = octant_z_scores["FG"]
+        # zJK = octant_z_scores["JK"]
+        # zLM = octant_z_scores["LM"]
+        # zDE = octant_z_scores["DE"]
+
         # Calculate DOM and LOV factor scores using IAS-R formula
         # DOM = 0.03 * [(zPA - zHI) + 0.707(zNO + zBC - zFG - zJK)]
         # LOV = 0.03 * [(zLM - zDE) + 0.707(zNO - zBC - zFG + zJK)]
         
-        zPA = octant_z_scores["PA"]
-        zHI = octant_z_scores["HI"]
-        zNO = octant_z_scores["NO"]
-        zBC = octant_z_scores["BC"]
-        zFG = octant_z_scores["FG"]
-        zJK = octant_z_scores["JK"]
-        zLM = octant_z_scores["LM"]
-        zDE = octant_z_scores["DE"]
+        # Use raw scores instead of Z-scores for DOM and LOV calculations
+        rawPA = octant_scores["PA"]
+        rawHI = octant_scores["HI"]
+        rawNO = octant_scores["NO"]
+        rawBC = octant_scores["BC"]
+        rawFG = octant_scores["FG"]
+        rawJK = octant_scores["JK"]
+        rawLM = octant_scores["LM"]
+        rawDE = octant_scores["DE"]
         
-        dom_factor = 0.03 * ((zPA - zHI) + 0.707 * (zNO + zBC - zFG - zJK))
-        lov_factor = 0.03 * ((zLM - zDE) + 0.707 * (zNO - zBC - zFG + zJK))
-        
-        # Calculate polar coordinates
-        # ANGLE = tan^-1(zDOM / zLOV) with adjustments
-        if lov_factor == 0:
-            angle = 90 if dom_factor > 0 else 270
-        else:
-            angle = np.arctan(dom_factor / lov_factor) * 180 / np.pi
-            
-            # Apply angle adjustments
-            if lov_factor < 0:
-                angle += 180
-            elif lov_factor > 0 and dom_factor < 0:
-                angle += 360
-        
-        # VECTOR LENGTH = sqrt(zDOM^2 + zLOV^2)
-        vector_length = np.sqrt(dom_factor**2 + lov_factor**2)
-        
-        # Convert to T-score: T = (vector_length * 10) + 50
-        t_score = (vector_length * 10) + 50
+        dom_factor = (rawPA - rawHI) + 0.707 * (rawNO + rawBC - rawFG - rawJK)
+        lov_factor = (rawLM - rawDE) + 0.707 * (rawNO - rawBC - rawFG + rawJK)
+
+        scaled_dom_factor = (dom_factor / 16.9) * 100
+        scaled_lov_factor = (lov_factor / 16.9) * 100
         
         return {
-            "dominance": float(dom_factor),
-            "warmth": float(lov_factor),  # Using "warmth" instead of "love" as requested
+            "dominance": float(scaled_dom_factor),
+            "warmth": float(scaled_lov_factor),  # Using "warmth" instead of "love" as requested
             "octants": {k: float(v) for k, v in octant_scores.items()},
             "octant_z_scores": {k: float(v) for k, v in octant_z_scores.items()},
-            "angle": float(angle),
-            "vector_length": float(vector_length),
-            "t_score": float(t_score)
         }
     
     def administer_single_assessment(self, model: str, persona_prompt: str, 
@@ -668,8 +666,8 @@ def administer_assessments(csv_file: str, output_dir: Optional[str] = None,
             agent_results = {
                 "agent_id": agent_id,
                 "model": row['model'],
-                "target_dominance": int(row['dominance_score']) if row['dominance_score'] != '' else None,
-                "target_warmth": int(row['warmth_score']) if row['warmth_score'] != '' else None,
+                "target_dominance": float(row['dominance_score']) if row['dominance_score'] != '' else None,
+                "target_warmth": float(row['warmth_score']) if row['warmth_score'] != '' else None,
                 "prompt": row['prompt'],
                 "assessments": {},
                 "timestamp": datetime.now().isoformat()
@@ -686,18 +684,6 @@ def administer_assessments(csv_file: str, output_dir: Optional[str] = None,
                     assessment_type=assessment
                 )
                 
-                # Save raw response to file
-                response_file = os.path.join(output_dir, f"{agent_id}_{assessment}_response.txt")
-                if assessment_result.get('raw_response'):
-                    with open(response_file, 'w', encoding='utf-8') as f:
-                        f.write(assessment_result['raw_response'])
-                
-                # Save parsed responses if available
-                if assessment_result.get('parsed_responses'):
-                    parsed_file = os.path.join(output_dir, f"{agent_id}_{assessment}_parsed.txt")
-                    with open(parsed_file, 'w', encoding='utf-8') as f:
-                        f.write(','.join(map(str, assessment_result['parsed_responses'])))
-                
                 # Store results
                 agent_results["assessments"][assessment] = assessment_result
                 
@@ -706,8 +692,6 @@ def administer_assessments(csv_file: str, output_dir: Optional[str] = None,
                     print(f"    ✓ {assessment} completed successfully")
                     if assessment == "IAS" and assessment_result.get('scores'):
                         scores = assessment_result['scores']
-                        print(f"      Measured Dominance: {scores['dominance']:.1f} (target: {row['dominance_score']})")
-                        print(f"      Measured Warmth: {scores['warmth']:.1f} (target: {row['warmth_score']})")
                 else:
                     print(f"    ✗ {assessment} failed: {assessment_result.get('error', 'Unknown error')}")
                 
@@ -717,7 +701,7 @@ def administer_assessments(csv_file: str, output_dir: Optional[str] = None,
             results.append(agent_results)
     
     # Save comprehensive results
-    results_file = os.path.join(output_dir, "assessment_results.json")
+    results_file = os.path.join(output_dir, "assessment_results_prompted.json")
     with open(results_file, 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=2)
     
@@ -772,21 +756,9 @@ def generate_summary_report(results: List[Dict], output_dir: str):
         if ias.get('status') == 'success' and ias.get('scores'):
             scores = ias['scores']
             report_lines.append("\nIAS Interpersonal Scores:")
-            report_lines.append(f"  Measured Dominance: {scores['dominance']:5.1f} (target: {agent['target_dominance']})")
-            report_lines.append(f"  Measured Warmth:    {scores['warmth']:5.1f} (target: {agent['target_warmth']})")
+            report_lines.append(f"  Measured Dominance: {scores['dominance']:5.1f}")
+            report_lines.append(f"  Measured Warmth:    {scores['warmth']:5.1f}")
             
-            # Calculate errors only if target values are not None
-            if agent['target_dominance'] is not None:
-                dominance_error = abs(scores['dominance'] - agent['target_dominance'])
-                report_lines.append(f"  Dominance Error:    {dominance_error:5.1f}")
-            else:
-                report_lines.append(f"  Dominance Error:    N/A (no target)")
-                
-            if agent['target_warmth'] is not None:
-                warmth_error = abs(scores['warmth'] - agent['target_warmth'])
-                report_lines.append(f"  Warmth Error:       {warmth_error:5.1f}")
-            else:
-                report_lines.append(f"  Warmth Error:       N/A (no target)")
         else:
             report_lines.append("\nIAS: Failed")
         
@@ -810,8 +782,8 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         csv_file = sys.argv[1]
     else:
-        #csv_file = "samples/samples_n1.csv"
-        csv_file = "samples/samples_all_providers.csv"
+        csv_file = "samples/samples_n1.csv"
+        # csv_file = "samples/samples_all_providers.csv"
     
     if not os.path.exists(csv_file):
         print(f"Error: CSV file '{csv_file}' not found.")

@@ -1,7 +1,4 @@
 model,warmth_score,dominance_score,prompt
-gpt-4o,,,You are a helpful AI assistant.
-claude-3-5-sonnet-20241022,,,You are a helpful AI assistant.
-gemini-1.5-pro,,,You are a helpful AI assistant.
-gpt-4.1-mini,,,You are a helpful AI assistant.
-claude-3-5-haiku-20241022,,,You are a helpful AI assistant.
-gemini-1.5-flash,,,You are a helpful AI assistant. 
+gpt-4.1,,,
+claude-sonnet-4-20250514,,,
+gemini-1.5-flash,,,
