@@ -2,16 +2,30 @@ import os
 import sys
 import time
 import random
-import openai
+import anthropic
+import google.generativeai as genai
 import numpy as np
 import pandas as pd
 from pydantic import BaseModel
+from openai import OpenAI
+from dotenv import load_dotenv
+from anthropic import Anthropic
 from concurrent.futures import ThreadPoolExecutor
 
 # ========== SETUP ==========
+# Load environment variables from .env file
+load_dotenv()
 
-# Set OpenAI API key
-openai.api_key = os.environ.get("OPENAI_API_KEY")
+# Set API keys and clients
+openai_key = os.getenv("OPENAI_API_KEY")
+anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+gemini_key = os.getenv("GOOGLE_API_KEY")
+
+# Initialize clients
+openai_client = OpenAI(api_key=openai_key) if openai_key else None
+anthropic_client = Anthropic(api_key=anthropic_key) if anthropic_key else None
+if gemini_key:
+    genai.configure(api_key=gemini_key)
 
 # Negotiation settings
 temperature = 0
@@ -21,8 +35,8 @@ num_tries = 2
 exercise = "table"
 
 # Filepaths
-sample_path = f'samples/samples_full.csv'
-negotiation_path = f'negotiations/{round}_{exercise}_negotiations.csv'
+sample_path = f'samples/dyads_n1.csv'
+negotiation_path = f'negotiations/round1_{exercise}_negotiations.csv'
 
 # Load prompts
 df_prompts = pd.read_csv(sample_path).fillna('')
@@ -39,23 +53,101 @@ with open(f'prompts/{exercise}_role2_svi_instructions.txt', 'r') as file:
 with open('prompts/svi_survey.txt', 'r') as file:
     svi_survey = file.read()
 
-# ========== SANITY CHECKS ==========
-test_mode = False
-if test_mode:
-    df_prompts = df_prompts.head(10)
+# ========== PROVIDER FUNCTIONS ==========
+
+def get_provider(model_name):
+    """Determine the provider for a given model name."""
+    model_lower = model_name.lower()
+    if 'gpt' in model_lower or any(x in model_lower for x in ['o1', 'o2', 'o3', 'o4']):
+        return 'openai'
+    elif 'claude' in model_lower:
+        return 'anthropic'
+    elif 'gemini' in model_lower:
+        return 'google'
+    else:
+        return 'openai'  # default
+
+def create_chat_completion(model, messages, temperature):
+    """Create a chat completion using the appropriate provider."""
+    provider = get_provider(model)
+    
+    try:
+        if provider == 'openai':
+            if not openai_client:
+                print(f"Warning: OpenAI API key not set for model {model}")
+                return None
+            response = openai_client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+            )
+            return response.choices[0].message.content
+        
+        elif provider == 'anthropic':
+            if not anthropic_client:
+                print(f"Warning: Anthropic API key not set for model {model}")
+                return None
+            # Convert OpenAI format to Anthropic format
+            system_message = ""
+            user_messages = []
+            
+            for msg in messages:
+                if msg['role'] == 'system':
+                    system_message = msg['content']
+                elif msg['role'] == 'user':
+                    user_messages.append(msg['content'])
+                elif msg['role'] == 'assistant':
+                    user_messages.append(msg['content'])
+            
+            # Combine messages for Anthropic
+            full_prompt = system_message + "\n\n" + "\n\n".join(user_messages)
+            
+            response = anthropic_client.messages.create(
+                model=model,
+                max_tokens=1000,
+                temperature=temperature,
+                messages=[{"role": "user", "content": full_prompt}]
+            )
+            return response.content[0].text
+        
+        elif provider == 'google':
+            if not gemini_key:
+                print(f"Warning: Google API key not set for model {model}")
+                return None
+            # Convert to Google format
+            model_obj = genai.GenerativeModel(model)
+            
+            # Combine messages for Google
+            full_prompt = ""
+            for msg in messages:
+                if msg['role'] == 'system':
+                    full_prompt += f"System: {msg['content']}\n\n"
+                elif msg['role'] == 'user':
+                    full_prompt += f"User: {msg['content']}\n\n"
+                elif msg['role'] == 'assistant':
+                    full_prompt += f"Assistant: {msg['content']}\n\n"
+            
+            response = model_obj.generate_content(
+                full_prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=temperature,
+                    max_output_tokens=1000
+                )
+            )
+            return response.text
+        
+    except Exception as e:
+        print(f"Error with {provider} model {model}: {e}")
+        return None
 
 # ========== DEFINITIONS ==========
 
 # Survey administration
 def administer_svi(bot_history, model, temperature):
     bot_history.append({"role": "user", "content": svi_survey})
-    response = openai.chat.completions.create(
-        model=model,
-        messages=bot_history,
-        temperature=temperature,
-    )
-    answer = response.choices[0].message.content
-    bot_history.append({"role": "assistant", "content": answer})
+    answer = create_chat_completion(model, bot_history, temperature)
+    if answer:
+        bot_history.append({"role": "assistant", "content": answer})
     return answer
 
 # Reasoning schemas
@@ -87,53 +179,52 @@ def simulate_negotiation(
     current_speaker = random.choice([role1, role2])
 
     if current_speaker == role1:
-        role1_response = openai.chat.completions.create(
-            model=model, messages=role1_history, temperature=temperature
-        ).choices[0].message.content.strip()
-        role1_history.append({"role": "assistant", "content": role1_response})
-        role2_history.append({"role": "user", "content": role1_response})
-        conversation_history.append(role1_response)
+        role1_response = create_chat_completion(model, role1_history, temperature)
+        if role1_response:
+            role1_response = role1_response.strip()
+            role1_history.append({"role": "assistant", "content": role1_response})
+            role2_history.append({"role": "user", "content": role1_response})
+            conversation_history.append(role1_response)
         current_speaker = role2
     else:
-        role2_response = openai.chat.completions.create(
-            model=model, messages=role2_history, temperature=temperature
-        ).choices[0].message.content.strip()
-        role2_history.append({"role": "assistant", "content": role2_response})
-        role1_history.append({"role": "user", "content": role2_response})
-        conversation_history.append(role2_response)
+        role2_response = create_chat_completion(model, role2_history, temperature)
+        if role2_response:
+            role2_response = role2_response.strip()
+            role2_history.append({"role": "assistant", "content": role2_response})
+            role1_history.append({"role": "user", "content": role2_response})
+            conversation_history.append(role2_response)
         current_speaker = role1
 
-    # Negotiation rounds
     for i in range(max_rounds):
         if current_speaker == role1:
-            role1_response = openai.chat.completions.create(
-                model=model, messages=role1_history, temperature=temperature
-            ).choices[0].message.content.strip()
+            role1_response = create_chat_completion(model, role1_history, temperature)
             if role1_response:
+                role1_response = role1_response.strip()
                 role1_history.append({"role": "assistant", "content": role1_response})
                 role2_history.append({"role": "user", "content": role1_response})
                 conversation_history.append(role1_response)
             current_speaker = role2
         else:
-            role2_response = openai.chat.completions.create(
-                model=model, messages=role2_history, temperature=temperature
-            ).choices[0].message.content.strip()
+            role2_response = create_chat_completion(model, role2_history, temperature)
             if role2_response:
+                role2_response = role2_response.strip()
                 role2_history.append({"role": "assistant", "content": role2_response})
                 role1_history.append({"role": "user", "content": role2_response})
                 conversation_history.append(role2_response)
             current_speaker = role1
 
         # Check for end conditions
-        if "[DEAL REACHED]" in role1_response or "[DEAL REACHED]" in role2_response \
-            or "[NO DEAL]" in role1_response or "[NO DEAL]" in role2_response \
+        if (role1_response and ("[DEAL REACHED]" in role1_response or "[NO DEAL]" in role1_response)) \
+            or (role2_response and ("[DEAL REACHED]" in role2_response or "[NO DEAL]" in role2_response)) \
             or i == max_rounds - 1:
             
             # Administer SVI before ending
             role1_svi = administer_svi(role1_history, model, temperature)
             role2_svi = administer_svi(role2_history, model, temperature)
-            conversation_history.append(f"{role1}: {role1_svi}")
-            conversation_history.append(f"{role2}: {role2_svi}")
+            if role1_svi:
+                conversation_history.append(f"{role1}: {role1_svi}")
+            if role2_svi:
+                conversation_history.append(f"{role2}: {role2_svi}")
             break
 
     return conversation_history
@@ -143,13 +234,17 @@ def simulate_negotiation_wrapper(row):
     if pd.notna(row['conversation']):
         return row['conversation']
 
+    # Determine which model to use for this negotiation
+    # For now, use model_1 as the primary model for the negotiation
+    model = row['model_1'] if pd.notna(row['model_1']) else 'gpt-4'
+
     for attempt in range(num_tries):
         try:
             return simulate_negotiation(
                 role1_instructions=role1_instructions,
                 role2_instructions=role2_instructions,
-                role1_competition_prompt=prompt_prelude + row['prompt_1'],
-                role2_competition_prompt=prompt_prelude + row['prompt_2'],
+                role1_competition_prompt=prompt_prelude + str(row['prompt_1']),
+                role2_competition_prompt=prompt_prelude + str(row['prompt_2']),
                 # role1="Buyer",
                 # role2="Seller",
                 model=model,
@@ -162,46 +257,78 @@ def simulate_negotiation_wrapper(row):
     return None
 
 # ========== MAIN LOOP ==========
-# Mark rows where conversation is missing
-def is_missing(x):
-    return (x is None) or (pd.isna(x)) or (str(x).strip() == "")
-
-prompt_cols = df_prompts.columns.tolist()        # columns that uniquely define a prompt
-conv_col     = "conversation"
-
-# Load or initialize negotiations
-if os.path.exists(negotiation_path):
-    df_negotiations = pd.read_csv(negotiation_path)
-else:
-    df_negotiations = df_prompts.copy()
-
-# Make sure 'conversation' column exists
-if 'conversation' not in df_negotiations.columns:
-    df_negotiations['conversation'] = None
-else:
-    df_negotiations['conversation'] = df_negotiations['conversation'].astype('object')
-
-# Only work on rows where conversation is missing
-incomplete_rows = df_negotiations[df_negotiations['conversation'].apply(is_missing)]
-rows = [row for _, row in incomplete_rows.iterrows()]
-chunks = [rows[i:i + chunk_size] for i in range(0, len(rows), chunk_size)]
-
-# Start timing
-start = time.time()
-
-# Process chunks
-for chunk_index, chunk in enumerate(chunks):
-    print(f"\rProcessing chunk {chunk_index + 1}/{len(chunks)}", end="\t")
-    sys.stdout.flush()
-
-    with ThreadPoolExecutor(max_workers=chunk_size) as executor:
-        responses = list(executor.map(simulate_negotiation_wrapper, chunk))
-
-    for i, row in enumerate(chunk):
-        df_negotiations.at[row.name, 'conversation'] = responses[i]
+def main():
+    # Check if any API keys are available
+    if not any([openai_client, anthropic_client, gemini_key]):
+        print("Error: No API keys found. Please set at least one of:")
+        print("  - OPENAI_API_KEY")
+        print("  - ANTHROPIC_API_KEY") 
+        print("  - GOOGLE_API_KEY")
+        return
     
-    df_negotiations.to_csv(negotiation_path, index=False)
+    # Load prompts
+    df_prompts = pd.read_csv(sample_path).fillna('')
+    with open('prompts/prelude.txt', 'r') as file:
+        prompt_prelude = file.read()
+    with open(f'prompts/{exercise}_role1_instructions.txt', 'r') as file:
+        role1_instructions = file.read()
+    with open(f'prompts/{exercise}_role2_instructions.txt', 'r') as file:
+        role2_instructions = file.read()
+    with open(f'prompts/{exercise}_role1_svi_instructions.txt', 'r') as file:
+        role1_svi_prompt = file.read()
+    with open(f'prompts/{exercise}_role2_svi_instructions.txt', 'r') as file:
+        role2_svi_prompt = file.read()
+    with open('prompts/svi_survey.txt', 'r') as file:
+        svi_survey = file.read()
 
-# End timing
-end = time.time()
-print(f"\nTotal time: {(end - start) / 60:.2f} minutes")
+    # ========== SANITY CHECKS ==========
+    test_mode = False
+    if test_mode:
+        df_prompts = df_prompts.head(10)
+
+    # Mark rows where conversation is missing
+    def is_missing(x):
+        return (x is None) or (pd.isna(x)) or (str(x).strip() == "")
+
+    prompt_cols = df_prompts.columns.tolist()        # columns that uniquely define a prompt
+    conv_col     = "conversation"
+
+    # Load or initialize negotiations
+    if os.path.exists(negotiation_path):
+        df_negotiations = pd.read_csv(negotiation_path)
+    else:
+        df_negotiations = df_prompts.copy()
+
+    # Make sure 'conversation' column exists
+    if 'conversation' not in df_negotiations.columns:
+        df_negotiations['conversation'] = None
+    else:
+        df_negotiations['conversation'] = df_negotiations['conversation'].astype('object')
+
+    # Only work on rows where conversation is missing
+    incomplete_rows = df_negotiations[df_negotiations['conversation'].apply(is_missing)]
+    rows = [row for _, row in incomplete_rows.iterrows()]
+    chunks = [rows[i:i + chunk_size] for i in range(0, len(rows), chunk_size)]
+
+    # Start timing
+    start = time.time()
+
+    # Process chunks
+    for chunk_index, chunk in enumerate(chunks):
+        print(f"\rProcessing chunk {chunk_index + 1}/{len(chunks)}", end="\t")
+        sys.stdout.flush()
+
+        with ThreadPoolExecutor(max_workers=chunk_size) as executor:
+            responses = list(executor.map(simulate_negotiation_wrapper, chunk))
+
+        for i, row in enumerate(chunk):
+            df_negotiations.at[row.name, 'conversation'] = responses[i]
+        
+        df_negotiations.to_csv(negotiation_path, index=False)
+
+    # End timing
+    end = time.time()
+    print(f"\nTotal time: {(end - start) / 60:.2f} minutes")
+
+if __name__ == "__main__":
+    main()
