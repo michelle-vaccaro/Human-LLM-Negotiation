@@ -2,7 +2,7 @@ import csv
 import json
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
-import os
+import os, re
 import time
 import numpy as np
 from openai import OpenAI
@@ -191,17 +191,22 @@ class PersonalityAssessment:
     B. I always share the problem with the other person so that we can work it out.""",    
         ]
         
-        # IAS octants
+        # IAS octants (full version with item numbers matching IAS-R scoring)
+        # Item numbers correspond to the IAS-R scoring procedure
         self.ias_items = {
-            "PA": ["Leading", "Dominant", "Assertive", "Self-assured"],
-            "BC": ["Arrogant", "Calculating", "Cocky", "Boastful"],
-            "DE": ["Cold-hearted", "Cruel", "Hostile", "Rebellious"],
-            "FG": ["Aloof", "Introverted", "Reserved", "Withdrawn"],
-            "HI": ["Unassured", "Submissive", "Timid", "Meek"],
-            "JK": ["Agreeable", "Warm-hearted", "Tender", "Kind"],
-            "LM": ["Sociable", "Outgoing", "Enthusiastic", "Cheerful"],
-            "NO": ["Self-confident", "Independent", "Persistent", "Self-reliant"]
+            "PA": ["Assertive", "Dominant", "Forceful", "Self-assured", "Domineering", "Firm", "Self-confident", "Persistent"],
+            "BC": ["Boastful", "Tricky", "Calculating", "Cocky", "Wily", "Sly", "Cunning", "Crafty"],
+            "DE": ["Ruthless", "Hardhearted", "Uncharitable", "Iron-hearted", "Warmthless", "Unsympathetic", "Coldhearted", "Cruel"],
+            "FG": ["Unsparkling", "Unneighbourly", "Anti-social", "Dissocial", "Uncheery", "Distant", "Unsociable", "Introverted"],
+            "HI": ["Timid", "Unaggressive", "Unbold", "Shy", "Meek", "Unauthoritative", "Forceless", "Bashful"],
+            "JK": ["Unargumentative", "Uncunning", "Undemanding", "Unwily", "Unsly", "Uncalculating", "Uncrafty", "Boastless"],
+            "LM": ["Soft-hearted", "Kind", "Tender", "Tenderhearted", "Accommodating", "Charitable", "Gentlehearted", "Sympathetic"],
+            "NO": ["Cheerful", "Extraverted", "Perky", "Neighbourly", "Jovial", "Enthusiastic", "Friendly", "Outgoing"]
         }
+        
+        # Note: Big Five scoring requires the full IAS-R with 124 items
+        # Our current implementation only has 64 items (8 per octant)
+        # Big Five scoring is not available with the current item set
     
     def create_assessment_prompt(self, assessment_type: str, persona_prompt: str) -> str:
         """Create a prompt for the agent to complete an assessment"""        
@@ -215,8 +220,9 @@ class PersonalityAssessment:
     
     def _create_bfi_prompt(self) -> str:
         """Create BFI assessment prompt"""
-        prompt = """Below are characteristics that may or may not apply to you. 
-For each statement, indicate the extent to which you agree or disagree using this scale:
+        prompt = """Here are a number of characteristics that may or may not apply to you. 
+Please write a number next to each statement to indicate the extent to which you agree or disagree with that statement. 
+
 1 = Disagree strongly
 2 = Disagree a little
 3 = Neither agree nor disagree
@@ -235,8 +241,11 @@ I see myself as someone who...\n"""
     
     def _create_tki_prompt(self) -> str:
         """Create TKI assessment prompt"""
-        prompt = """For each pair of statements below, choose which statement (A or B) better describes 
-how you typically behave when facing a conflict situation.
+        prompt = """Consider situations in which you find your wishes differing from those of another person. How do you usually respond to such situations?
+
+On the following pages are several pairs of statements describing possible behavioral responses. For each pair, please circle the" A" or "B" statement which is most characteristic of your own behavior.
+
+In many cases, neither the "A" nor the "B" statement may be very typical of your behavior; but please select the response which you would be more likely to use.
 
 Please respond with ONLY the letter (A or B) for each item, separated by commas.
 
@@ -249,15 +258,18 @@ Please respond with ONLY the letter (A or B) for each item, separated by commas.
     
     def _create_ias_prompt(self) -> str:
         """Create IAS assessment prompt"""
-        prompt = """Below are adjectives that may or may not describe you.
-For each adjective, rate how accurately it describes you using this scale:
-1 = Very inaccurate
-2 = Moderately inaccurate
-3 = Neither accurate nor inaccurate
-4 = Moderately accurate
-5 = Very accurate
+        prompt = """This page lists words used to describe people’s personal characteristics.  Please rate how accurately each word describes you as a person.  Judge how accurately each word describes you on the following scale.  
 
-Please respond with ONLY the number (1-5) for each item, separated by commas.
+1 = Extremely inaccurate
+2 = Very inaccurate
+3 = Quite inaccurate
+4 = Slightly inaccurate
+5 = Slightly accurate
+6 = Quite accurate
+7 = Very accurate
+8 = Extremely accurate
+
+Please respond with ONLY the number (1-8) for each item, separated by commas.
 
 """
         item_num = 1
@@ -270,16 +282,18 @@ Please respond with ONLY the number (1-5) for each item, separated by commas.
         return prompt
     
     def get_agent_response(self, model: str, system_prompt: str, user_prompt: str, 
-                          temperature: float = 0.0, max_retries: int = 3) -> Optional[str]:
+                          temperature: float = 0.0, max_retries: int = 2) -> Optional[str]:
         """Get response from the AI agent via API"""
         
         # Model provider mapping
         openai_models = ["gpt-4", "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", 
                         "gpt-4-turbo", "gpt-3.5-turbo"]
-        anthropic_models = ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229", 
-                           "claude-3-sonnet-20240229", "claude-3-haiku-20240229", "claude-2.1", "claude-2.0", 
-                           "claude-instant-1.2"]
-        gemini_models = ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-1.0-pro", "gemini-1.0-pro-vision"]
+        anthropic_models = ['claude-3-haiku-20240307', 'claude-3-5-sonnet-20240620', 'claude-3-5-sonnet-20241022',
+                            'claude-3-5-haiku-20241022', 'claude-3-7-sonnet-20250219', 'claude-sonnet-4-20250514',
+                            'claude-opus-4-20250514']
+        gemini_models = ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-1.0-pro", "gemini-1.0-pro-vision",
+                         "gemini-2.0-flash-live-001", "gemini-2.0-flash-lite", "gemini-2.0-flash",
+                         "gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]
         
         # Models that don't support temperature parameter
         models_without_temperature = ["o3", "o3-mini", "o1", "o4-mini", "o4"]
@@ -314,10 +328,7 @@ Please respond with ONLY the number (1-5) for each item, separated by commas.
                 
                 elif model in anthropic_models:
                     if not self.anthropic_client:
-                        if not ANTHROPIC_AVAILABLE:
-                            raise ValueError(f"Anthropic package not available for model: {model}. Install with: pip install anthropic")
-                        else:
-                            raise ValueError(f"Anthropic client not initialized for model: {model}. Add ANTHROPIC_API_KEY to your .env file")
+                        raise ValueError(f"Anthropic client not initialized for model: {model}. Add ANTHROPIC_API_KEY to your .env file")
                     
                     response = self.anthropic_client.messages.create(
                         model=model,
@@ -330,10 +341,7 @@ Please respond with ONLY the number (1-5) for each item, separated by commas.
                 
                 elif model in gemini_models:
                     if not self.gemini_client:
-                        if not GEMINI_AVAILABLE:
-                            raise ValueError(f"Google Generative AI package not available for model: {model}. Install with: pip install google-generativeai")
-                        else:
-                            raise ValueError(f"Gemini client not initialized for model: {model}. Add GOOGLE_API_KEY to your .env file")
+                        raise ValueError(f"Gemini client not initialized for model: {model}. Add GOOGLE_API_KEY to your .env file")
                     
                     # Create model instance
                     model_instance = self.gemini_client.GenerativeModel(model)
@@ -345,7 +353,7 @@ Please respond with ONLY the number (1-5) for each item, separated by commas.
                         full_prompt,
                         generation_config=self.gemini_client.GenerationConfig(
                             temperature=temperature,
-                            max_output_tokens=1000
+                            # max_output_tokens=1000
                         )
                     )
                     return response.text.strip()
@@ -362,8 +370,6 @@ Please respond with ONLY the number (1-5) for each item, separated by commas.
     
     def parse_assessment_response(self, response_text: str, expected_items: int, assessment_type: str = None) -> Optional[List]:
         """Parse the agent's response into a list of responses (integers for BFI/IAS, strings for TKI)"""
-        
-        import re
         
         # For TKI, look for A/B responses
         if assessment_type == "TKI":
@@ -390,10 +396,10 @@ Please respond with ONLY the number (1-5) for each item, separated by commas.
             print(f"  Warning: Expected {expected_items} A/B responses but found {len(parsed_responses)}")
             return None
         
-        # For BFI and IAS, look for numeric responses (1-5)
+        # For BFI and IAS, look for numeric responses
         else:
             # Look for comma-separated numbers
-            numbers_match = re.findall(r'\b[1-5]\b', response_text)
+            numbers_match = re.findall(r'\b[1-8]\b', response_text)
             
             if len(numbers_match) >= expected_items:
                 # Take only the expected number of items
@@ -405,7 +411,7 @@ Please respond with ONLY the number (1-5) for each item, separated by commas.
             
             for line in lines:
                 # Look for patterns like "1. 5" or "1: 5" or just "5"
-                match = re.search(r'(?:^\d+[\.\:\)\s]+)?([1-5])\s*$', line.strip())
+                match = re.search(r'(?:^\d+[\.\:\)\s]+)?([1-8])\s*$', line.strip())
                 if match:
                     parsed_responses.append(int(match.group(1)))
             
@@ -454,7 +460,20 @@ Please respond with ONLY the number (1-5) for each item, separated by commas.
         }
 
     def score_ias(self, responses: List[int]) -> Dict[str, float]:
-        """Score IAS responses"""
+        """Score IAS responses using the IAS-R scoring procedure"""
+        # IAS-R norms (Total Sample means and standard deviations)
+        ias_norms = {
+            "PA": {"mean": 4.98, "sd": 0.97},
+            "BC": {"mean": 3.77, "sd": 1.12},
+            "DE": {"mean": 2.54, "sd": 0.85},
+            "FG": {"mean": 3.35, "sd": 1.01},
+            "HI": {"mean": 4.00, "sd": 1.06},
+            "JK": {"mean": 4.46, "sd": 0.95},
+            "LM": {"mean": 5.96, "sd": 0.81},
+            "NO": {"mean": 5.59, "sd": 0.89}
+        }
+        
+        # Calculate octant scores (mean of responses for each octant)
         octant_scores = {}
         response_idx = 0
         
@@ -465,58 +484,56 @@ Please respond with ONLY the number (1-5) for each item, separated by commas.
                 response_idx += 1
             octant_scores[octant] = octant_sum / len(adjectives)
         
-        # IAS interpersonal circumplex scoring
-        # Dominance (vertical axis): Dominant-Submissive
-        # Warmth (horizontal axis): Friendly-Hostile
+        # Convert octant scores to Z-scores
+        octant_z_scores = {}
+        for octant, score in octant_scores.items():
+            norm = ias_norms[octant]
+            z_score = (score - norm["mean"]) / norm["sd"]
+            octant_z_scores[octant] = z_score
         
-        # Calculate based on octant positions in the circumplex
-        # PA (90°): Dominant
-        # BC (45°): Dominant-Hostile  
-        # DE (0°): Hostile
-        # FG (-45°): Submissive-Hostile
-        # HI (-90°): Submissive
-        # JK (-135°): Submissive-Friendly
-        # LM (180°): Friendly
-        # NO (135°): Dominant-Friendly
+        # Calculate DOM and LOV factor scores using IAS-R formula
+        # DOM = 0.03 * [(zPA - zHI) + 0.707(zNO + zBC - zFG - zJK)]
+        # LOV = 0.03 * [(zLM - zDE) + 0.707(zNO - zBC - zFG + zJK)]
         
-        # Dominance calculation (vertical component)
-        dom_raw = (
-            octant_scores["PA"] * 1.0 +  # Full dominance
-            octant_scores["NO"] * 0.707 +  # 45° angle
-            octant_scores["BC"] * 0.707 +  # 45° angle
-            octant_scores["LM"] * 0.0 +  # Neutral
-            octant_scores["DE"] * 0.0 +  # Neutral
-            octant_scores["JK"] * -0.707 +  # -45° angle
-            octant_scores["FG"] * -0.707 +  # -45° angle
-            octant_scores["HI"] * -1.0  # Full submission
-        )
+        zPA = octant_z_scores["PA"]
+        zHI = octant_z_scores["HI"]
+        zNO = octant_z_scores["NO"]
+        zBC = octant_z_scores["BC"]
+        zFG = octant_z_scores["FG"]
+        zJK = octant_z_scores["JK"]
+        zLM = octant_z_scores["LM"]
+        zDE = octant_z_scores["DE"]
         
-        # Warmth calculation (horizontal component)
-        warm_raw = (
-            octant_scores["LM"] * 1.0 +  # Full warmth
-            octant_scores["NO"] * 0.707 +  # 45° angle
-            octant_scores["JK"] * 0.707 +  # 45° angle
-            octant_scores["PA"] * 0.0 +  # Neutral
-            octant_scores["HI"] * 0.0 +  # Neutral
-            octant_scores["BC"] * -0.707 +  # -45° angle
-            octant_scores["FG"] * -0.707 +  # -45° angle
-            octant_scores["DE"] * -1.0  # Full coldness
-        )
+        dom_factor = 0.03 * ((zPA - zHI) + 0.707 * (zNO + zBC - zFG - zJK))
+        lov_factor = 0.03 * ((zLM - zDE) + 0.707 * (zNO - zBC - zFG + zJK))
         
-        # Normalize to -100-100 scale
-        dom_score = dom_raw
-        warm_score = warm_raw
-
-        # Map to 0-100 where 50 is neutral
-        # dom_score = 50 + (dom_raw * 12.5)
-        # warm_score = 50 + (warm_raw * 12.5)
+        # Calculate polar coordinates
+        # ANGLE = tan^-1(zDOM / zLOV) with adjustments
+        if lov_factor == 0:
+            angle = 90 if dom_factor > 0 else 270
+        else:
+            angle = np.arctan(dom_factor / lov_factor) * 180 / np.pi
+            
+            # Apply angle adjustments
+            if lov_factor < 0:
+                angle += 180
+            elif lov_factor > 0 and dom_factor < 0:
+                angle += 360
+        
+        # VECTOR LENGTH = sqrt(zDOM^2 + zLOV^2)
+        vector_length = np.sqrt(dom_factor**2 + lov_factor**2)
+        
+        # Convert to T-score: T = (vector_length * 10) + 50
+        t_score = (vector_length * 10) + 50
         
         return {
-            "dominance": dom_score,
-            "warmth": warm_score,
-            "octants": octant_scores,
-            "raw_dominance": dom_raw,
-            "raw_warmth": warm_raw
+            "dominance": float(dom_factor),
+            "warmth": float(lov_factor),  # Using "warmth" instead of "love" as requested
+            "octants": {k: float(v) for k, v in octant_scores.items()},
+            "octant_z_scores": {k: float(v) for k, v in octant_z_scores.items()},
+            "angle": float(angle),
+            "vector_length": float(vector_length),
+            "t_score": float(t_score)
         }
     
     def administer_single_assessment(self, model: str, persona_prompt: str, 
