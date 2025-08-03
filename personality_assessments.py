@@ -5,6 +5,8 @@ from typing import Dict, List, Tuple, Optional
 import os, re
 import time
 import numpy as np
+import signal
+import sys
 from openai import OpenAI
 from dotenv import load_dotenv
 import google.generativeai as genai
@@ -12,6 +14,10 @@ from anthropic import Anthropic
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Global variables for signal handling
+current_results = []
+current_results_file = None
 
 class PersonalityAssessment:
     """Class to administer personality assessments to AI agents"""
@@ -617,6 +623,19 @@ def create_env_template():
         return False
     return True
 
+def signal_handler(signum, frame):
+    """Handle interrupt signals to save progress before exiting"""
+    global current_results, current_results_file
+    if current_results and current_results_file:
+        print(f"\n\nInterrupt received. Saving current progress to {current_results_file}...")
+        try:
+            with open(current_results_file, 'w', encoding='utf-8') as f:
+                json.dump(current_results, f, indent=2)
+            print("✓ Progress saved successfully!")
+        except Exception as e:
+            print(f"✗ Error saving progress: {e}")
+    sys.exit(1)
+
 def administer_assessments(csv_file: str, output_dir: Optional[str] = None, 
                           openai_api_key: Optional[str] = None,
                           gemini_api_key: Optional[str] = None,
@@ -629,6 +648,50 @@ def administer_assessments(csv_file: str, output_dir: Optional[str] = None,
     
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
+    
+    # Define results file path
+    results_file = os.path.join(output_dir, "assessment_results_prompted.json")
+    
+    # Set up signal handler for graceful interruption
+    global current_results, current_results_file
+    current_results_file = results_file
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    # Load existing results if file exists
+    existing_results = []
+    if os.path.exists(results_file):
+        try:
+            with open(results_file, 'r', encoding='utf-8') as f:
+                existing_results = json.load(f)
+            print(f"Loaded {len(existing_results)} existing results from {results_file}")
+        except (json.JSONDecodeError, FileNotFoundError):
+            print("Could not load existing results, starting fresh")
+            existing_results = []
+    
+    # Create a dictionary of already processed agents with their assessment status
+    processed_agents = {}
+    for result in existing_results:
+        agent_id = result["agent_id"]
+        assessments = result.get("assessments", {})
+        
+        # Check if all assessments were successful
+        all_successful = True
+        failed_assessments = []
+        
+        for assessment_type in ["BFI", "TKI", "IAS"]:
+            if assessment_type not in assessments:
+                all_successful = False
+                failed_assessments.append(assessment_type)
+            elif assessments[assessment_type].get('status') != 'success':
+                all_successful = False
+                failed_assessments.append(assessment_type)
+        
+        processed_agents[agent_id] = {
+            'all_successful': all_successful,
+            'failed_assessments': failed_assessments,
+            'result_index': len(processed_agents)  # Index in the results list
+        }
     
     try:
         # Initialize assessment tool
@@ -654,27 +717,54 @@ def administer_assessments(csv_file: str, output_dir: Optional[str] = None,
         return
     
     # Read CSV file
-    results = []
+    results = existing_results.copy()
+    current_results = results  # Update global variable
     
     with open(csv_file, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         
         for row in reader:
             agent_id = f"{row['model']}_dom{row['dominance_score']}_warm{row['warmth_score']}"
-            print(f"\nProcessing agent: {agent_id}")
             
-            agent_results = {
-                "agent_id": agent_id,
-                "model": row['model'],
-                "target_dominance": float(row['dominance_score']) if row['dominance_score'] != '' else None,
-                "target_warmth": float(row['warmth_score']) if row['warmth_score'] != '' else None,
-                "prompt": row['prompt'],
-                "assessments": {},
-                "timestamp": datetime.now().isoformat()
-            }
+            # Check if agent was already processed
+            if agent_id in processed_agents:
+                agent_info = processed_agents[agent_id]
+                
+                if agent_info['all_successful']:
+                    print(f"Skipping agent with all successful assessments: {agent_id}")
+                    continue
+                else:
+                    print(f"Re-running agent with failed assessments: {agent_id}")
+                    print(f"  Failed assessments: {agent_info['failed_assessments']}")
+                    
+                    # Get existing results for this agent
+                    existing_agent_result = existing_results[agent_info['result_index']]
+                    agent_results = existing_agent_result.copy()
+                    agent_results["timestamp"] = datetime.now().isoformat()  # Update timestamp
+            else:
+                print(f"\nProcessing new agent: {agent_id}")
+                
+                agent_results = {
+                    "agent_id": agent_id,
+                    "model": row['model'],
+                    "target_dominance": float(row['dominance_score']) if row['dominance_score'] != '' else None,
+                    "target_warmth": float(row['warmth_score']) if row['warmth_score'] != '' else None,
+                    "prompt": row['prompt'],
+                    "assessments": {},
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            # Determine which assessments to run
+            if agent_id in processed_agents and not processed_agents[agent_id]['all_successful']:
+                # Re-run only failed assessments
+                assessments_to_run = processed_agents[agent_id]['failed_assessments']
+                print(f"  Re-running failed assessments: {assessments_to_run}")
+            else:
+                # Run all assessments for new agents
+                assessments_to_run = ["BFI", "TKI", "IAS"]
             
             # For each assessment type
-            for assessment in ["BFI", "TKI", "IAS"]:
+            for assessment in assessments_to_run:
                 print(f"  Administering {assessment}...")
                 
                 # Administer the assessment and get results
@@ -698,12 +788,23 @@ def administer_assessments(csv_file: str, output_dir: Optional[str] = None,
                 # Rate limiting
                 time.sleep(1)
             
-            results.append(agent_results)
-    
-    # Save comprehensive results
-    results_file = os.path.join(output_dir, "assessment_results_prompted.json")
-    with open(results_file, 'w', encoding='utf-8') as f:
-        json.dump(results, f, indent=2)
+            # Add or update agent results in the list
+            if agent_id in processed_agents and not processed_agents[agent_id]['all_successful']:
+                # Update existing agent results
+                results[processed_agents[agent_id]['result_index']] = agent_results
+                print(f"  Updated existing agent results")
+            else:
+                # Add new agent results
+                results.append(agent_results)
+                print(f"  Added new agent results")
+            
+            current_results = results  # Update global variable
+            
+            # Save intermediate progress after each agent completes all assessments
+            print(f"  Saving intermediate progress...")
+            with open(results_file, 'w', encoding='utf-8') as f:
+                json.dump(results, f, indent=2)
+            print(f"  ✓ Progress saved to {results_file}")
     
     # Generate summary report
     generate_summary_report(results, output_dir)

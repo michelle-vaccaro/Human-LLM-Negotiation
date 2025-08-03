@@ -36,7 +36,6 @@ exercise = "table"
 
 # Filepaths
 sample_path = f'samples/dyads_n1.csv'
-negotiation_path = f'negotiations/round1_{exercise}_negotiations.csv'
 
 # Load prompts
 df_prompts = pd.read_csv(sample_path).fillna('')
@@ -265,6 +264,18 @@ def main():
         print("  - ANTHROPIC_API_KEY") 
         print("  - GOOGLE_API_KEY")
         return
+    
+    # Extract number from sample file name (e.g., "dyads_n1.csv" -> "1")
+    import re
+    sample_filename = sample_path.split('/')[-1]  # Get just the filename
+    match = re.search(r'dyads_n(\d+)\.csv', sample_filename)
+    if match:
+        n_number = match.group(1)
+    else:
+        n_number = "1"  # Default if pattern not found
+    
+    # Set negotiation path based on the extracted number
+    negotiation_path = f'negotiations/{exercise}_negotiations_n{n_number}.csv'
     
     # Load prompts
     df_prompts = pd.read_csv(sample_path).fillna('')
