@@ -203,10 +203,6 @@ class PersonalityAssessment:
             "LM": ["Soft-hearted", "Kind", "Tender", "Tenderhearted", "Accommodating", "Charitable", "Gentlehearted", "Sympathetic"],
             "NO": ["Cheerful", "Extraverted", "Perky", "Neighbourly", "Jovial", "Enthusiastic", "Friendly", "Outgoing"]
         }
-        
-        # Note: Big Five scoring requires the full IAS-R with 124 items
-        # Our current implementation only has 64 items (8 per octant)
-        # Big Five scoring is not available with the current item set
     
     def create_assessment_prompt(self, assessment_type: str, persona_prompt: str) -> str:
         """Create a prompt for the agent to complete an assessment"""        
@@ -452,11 +448,11 @@ Please respond with ONLY the number (1-8) for each item, separated by commas.
         accommodating = sum(self.tki_scoring_util([14,15,17,20,23,29], [0,2,3,10,24,26]) == np.array(answers))
         
         return {
-            "competing": competing,
-            "collaborating": collaborating, 
-            "compromising": compromising,
-            "avoiding": avoiding,
-            "accommodating": accommodating
+            "competing": int(competing),
+            "collaborating": int(collaborating), 
+            "compromising": int(compromising),
+            "avoiding": int(avoiding),
+            "accommodating": int(accommodating)
         }
 
     def score_ias(self, responses: List[int]) -> Dict[str, float]:
