@@ -309,30 +309,29 @@ Note that I know you are an AI. I still want you to complete the assessment as h
         
         for attempt in range(max_retries):
             try:
+                print(f"      Attempt {attempt + 1}: Making API call to {model}...")
                 # Determine provider and call appropriate API
                 if model in openai_models or model in models_without_temperature:
                     if not self.openai_client:
                         raise ValueError(f"OpenAI client not initialized for model: {model}")
                     
-                    if model in models_without_temperature:
-                        response = self.openai_client.chat.completions.create(
-                            model=model,
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_prompt}
-                            ],
-                            n=1
-                        )
-                    else:
-                        response = self.openai_client.chat.completions.create(
-                            model=model,
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_prompt}
-                            ],
-                            temperature=temperature,
-                            n=1
-                        )
+                    # Prepare the base request
+                    request_data = {
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        "n": 1
+                    }
+                    
+                    # Only add temperature if the model supports it
+                    if model not in models_without_temperature:
+                        request_data["temperature"] = temperature
+                    
+                    print(f"        Calling OpenAI API...")
+                    response = self.openai_client.chat.completions.create(**request_data)
+                    print(f"        Received response from OpenAI API")
                     return response.choices[0].message.content.strip()
                 
                 elif model in anthropic_models:
@@ -371,7 +370,14 @@ Note that I know you are an AI. I still want you to complete the assessment as h
                     raise ValueError(f"Unknown model: {model}. Supported models: {openai_models + anthropic_models + gemini_models}")
                 
             except Exception as e:
-                print(f"  API call failed (attempt {attempt + 1}/{max_retries}): {str(e)}")
+                error_str = str(e)
+                print(f"  API call failed (attempt {attempt + 1}/{max_retries}): {error_str}")
+                
+                # Check for quota errors - don't retry these
+                if "insufficient_quota" in error_str or "402" in error_str or "quota" in error_str.lower():
+                    print(f"  Quota error detected - stopping retries for this model")
+                    return None
+                
                 if attempt < max_retries - 1:
                     time.sleep(2 ** attempt)  # Exponential backoff
                 else:
@@ -407,8 +413,20 @@ Note that I know you are an AI. I still want you to complete the assessment as h
         
         # For BFI and IAS, look for numeric responses
         else:
-            # Look for comma-separated numbers
-            numbers_match = re.findall(r'\b[1-8]\b', response_text)
+            # Try comma-splitting approach first (more reliable for comma-separated values)
+            parts = response_text.strip().split(',')
+            numbers = []
+            for part in parts:
+                part = part.strip()
+                if part.isdigit() and 1 <= int(part) <= 8:
+                    numbers.append(int(part))
+            
+            if len(numbers) >= expected_items:
+                # Take only the expected number of items
+                return numbers[:expected_items]
+            
+            # Fallback to regex approach
+            numbers_match = re.findall(r'[1-8](?=\s*,|\s*$)', response_text)
             
             if len(numbers_match) >= expected_items:
                 # Take only the expected number of items
@@ -553,13 +571,34 @@ Note that I know you are an AI. I still want you to complete the assessment as h
         
         print(f"    Getting {assessment_type} responses from API...")
         
-        # Get response from agent
-        response_text = self.get_agent_response(
-            model=model,
-            system_prompt=persona_prompt,
-            user_prompt=assessment_prompt,
-            temperature=0.0  # Lower temperature for more consistent responses
-        )
+        # Get response from agent with timeout
+        import signal
+        
+        def timeout_handler(signum, frame):
+            raise TimeoutError("API call timed out")
+        
+        # Set 120-second timeout
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(120)
+        
+        try:
+            response_text = self.get_agent_response(
+                model=model,
+                system_prompt=persona_prompt,
+                user_prompt=assessment_prompt,
+                temperature=0.0  # Lower temperature for more consistent responses
+            )
+        except TimeoutError:
+            print(f"    Timeout occurred for {assessment_type}")
+            signal.alarm(0)  # Cancel the alarm
+            return {
+                "status": "error",
+                "error": "API call timed out",
+                "raw_response": None,
+                "scores": None
+            }
+        finally:
+            signal.alarm(0)  # Cancel the alarm
         
         if not response_text:
             return {
@@ -639,8 +678,18 @@ def signal_handler(signum, frame):
 def administer_assessments(csv_file: str, output_dir: Optional[str] = None, 
                           openai_api_key: Optional[str] = None,
                           gemini_api_key: Optional[str] = None,
-                          anthropic_api_key: Optional[str] = None):
-    """Main function to administer assessments to agents from CSV"""
+                          anthropic_api_key: Optional[str] = None,
+                          retry_failed_attempts: bool = True):
+    """Main function to administer assessments to agents from CSV
+    
+    Args:
+        csv_file: Path to CSV file containing agent information
+        output_dir: Directory to save results (defaults to OUTPUT_DIR env var or "assessment_results")
+        openai_api_key: OpenAI API key (optional, can use OPENAI_API_KEY env var)
+        gemini_api_key: Google Gemini API key (optional, can use GOOGLE_API_KEY env var)
+        anthropic_api_key: Anthropic API key (optional, can use ANTHROPIC_API_KEY env var)
+        retry_failed_attempts: Whether to retry failed assessments (default: True)
+    """
     
     # Use output directory from .env if not specified
     if output_dir is None:
@@ -649,8 +698,9 @@ def administer_assessments(csv_file: str, output_dir: Optional[str] = None,
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
     
-    # Define results file path
-    results_file = os.path.join(output_dir, "assessment_results_prompted.json")
+    # Define results file path based on CSV file name stem
+    csv_stem = os.path.splitext(os.path.basename(csv_file))[0]
+    results_file = os.path.join(output_dir, f"assessment_{csv_stem}.json")
     
     # Set up signal handler for graceful interruption
     global current_results, current_results_file
@@ -734,13 +784,18 @@ def administer_assessments(csv_file: str, output_dir: Optional[str] = None,
                     print(f"Skipping agent with all successful assessments: {agent_id}")
                     continue
                 else:
-                    print(f"Re-running agent with failed assessments: {agent_id}")
-                    print(f"  Failed assessments: {agent_info['failed_assessments']}")
-                    
-                    # Get existing results for this agent
-                    existing_agent_result = existing_results[agent_info['result_index']]
-                    agent_results = existing_agent_result.copy()
-                    agent_results["timestamp"] = datetime.now().isoformat()  # Update timestamp
+                    if not retry_failed_attempts:
+                        print(f"Skipping agent with failed assessments (retry disabled): {agent_id}")
+                        print(f"  Failed assessments: {agent_info['failed_assessments']}")
+                        continue
+                    else:
+                        print(f"Re-running agent with failed assessments: {agent_id}")
+                        print(f"  Failed assessments: {agent_info['failed_assessments']}")
+                        
+                        # Get existing results for this agent
+                        existing_agent_result = existing_results[agent_info['result_index']]
+                        agent_results = existing_agent_result.copy()
+                        agent_results["timestamp"] = datetime.now().isoformat()  # Update timestamp
             else:
                 print(f"\nProcessing new agent: {agent_id}")
                 
@@ -761,7 +816,7 @@ def administer_assessments(csv_file: str, output_dir: Optional[str] = None,
                 print(f"  Re-running failed assessments: {assessments_to_run}")
             else:
                 # Run all assessments for new agents
-                assessments_to_run = ["BFI", "TKI", "IAS"]
+                assessments_to_run = ASSESSMENTS_TO_RUN
             
             # For each assessment type
             for assessment in assessments_to_run:
@@ -871,7 +926,9 @@ def generate_summary_report(results: List[Dict], output_dir: str):
         f.write('\n'.join(report_lines))
 
 if __name__ == "__main__":
-    # Example usage
+    # Configure which assessments to run
+    # Options: "BFI", "TKI", "IAS"
+    ASSESSMENTS_TO_RUN = ["IAS"]
     import sys
     
     # Check if .env file exists
@@ -883,11 +940,11 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         csv_file = sys.argv[1]
     else:
-        csv_file = "samples/samples_n1.csv"
-        # csv_file = "samples/samples_all_providers.csv"
+        # csv_file = "samples/models_all_unprompted.csv"
+        csv_file = "samples/models_all_prompted.csv"
     
     if not os.path.exists(csv_file):
         print(f"Error: CSV file '{csv_file}' not found.")
         sys.exit(1)
     
-    administer_assessments(csv_file)
+    administer_assessments(csv_file, retry_failed_attempts=True)
