@@ -35,7 +35,7 @@ num_tries = 2
 exercise = "table"
 
 # Filepaths
-sample_path = f'samples/dyads_n1.csv'
+sample_path = f'samples/dyads_all_unprompted_1.csv'
 
 # Load prompts
 df_prompts = pd.read_csv(sample_path).fillna('')
@@ -75,11 +75,23 @@ def create_chat_completion(model, messages, temperature):
             if not openai_client:
                 print(f"Warning: OpenAI API key not set for model {model}")
                 return None
-            response = openai_client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-            )
+            
+            # Models that don't support temperature parameter
+            models_without_temperature = ["o3", "o3-mini", "o1", "o4-mini", "o4"]
+            
+            if model in models_without_temperature:
+                # For models that don't support temperature, omit the parameter
+                response = openai_client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                )
+            else:
+                # For models that support temperature, include it
+                response = openai_client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                )
             return response.choices[0].message.content
         
         elif provider == 'anthropic':
@@ -237,13 +249,17 @@ def simulate_negotiation_wrapper(row):
     # For now, use model_1 as the primary model for the negotiation
     model = row['model_1'] if pd.notna(row['model_1']) else 'gpt-4'
 
+    # Handle empty prompt values
+    prompt_1 = str(row['prompt_1']) if pd.notna(row['prompt_1']) and str(row['prompt_1']).strip() != '' else ''
+    prompt_2 = str(row['prompt_2']) if pd.notna(row['prompt_2']) and str(row['prompt_2']).strip() != '' else ''
+
     for attempt in range(num_tries):
         try:
             return simulate_negotiation(
                 role1_instructions=role1_instructions,
                 role2_instructions=role2_instructions,
-                role1_competition_prompt=prompt_prelude + str(row['prompt_1']),
-                role2_competition_prompt=prompt_prelude + str(row['prompt_2']),
+                role1_competition_prompt=prompt_prelude + prompt_1,
+                role2_competition_prompt=prompt_prelude + prompt_2,
                 # role1="Buyer",
                 # role2="Seller",
                 model=model,
@@ -265,20 +281,17 @@ def main():
         print("  - GOOGLE_API_KEY")
         return
     
-    # Extract number from sample file name (e.g., "dyads_n1.csv" -> "1")
-    import re
-    sample_filename = sample_path.split('/')[-1]  # Get just the filename
-    match = re.search(r'dyads_n(\d+)\.csv', sample_filename)
-    if match:
-        n_number = match.group(1)
-    else:
-        n_number = "1"  # Default if pattern not found
+    # Generate output path based on sample path
+    # Replace "samples/" with "negotiations/" and "dyads" with "negotiations"
+    negotiation_path = sample_path.replace('samples/', 'negotiations/').replace('dyads', 'negotiations')
     
-    # Set negotiation path based on the extracted number
-    negotiation_path = f'negotiations/{exercise}_negotiations_n{n_number}.csv'
-    
-    # Load prompts
-    df_prompts = pd.read_csv(sample_path).fillna('')
+    # Load prompts - handle empty values properly
+    df_prompts = pd.read_csv(sample_path)
+    # Fill NaN values with empty strings for string columns, but preserve numeric columns as NaN
+    string_columns = ['model_1', 'model_2', 'prompt_1', 'prompt_2']
+    for col in string_columns:
+        if col in df_prompts.columns:
+            df_prompts[col] = df_prompts[col].fillna('')
     with open('prompts/prelude.txt', 'r') as file:
         prompt_prelude = file.read()
     with open(f'prompts/{exercise}_role1_instructions.txt', 'r') as file:
@@ -320,6 +333,14 @@ def main():
     incomplete_rows = df_negotiations[df_negotiations['conversation'].apply(is_missing)]
     rows = [row for _, row in incomplete_rows.iterrows()]
     chunks = [rows[i:i + chunk_size] for i in range(0, len(rows), chunk_size)]
+    
+    print(f"Total rows in file: {len(df_negotiations)}")
+    print(f"Rows with missing conversations: {len(incomplete_rows)}")
+    print(f"Number of chunks to process: {len(chunks)}")
+    
+    if len(incomplete_rows) == 0:
+        print("No conversations to process. All conversations are already complete.")
+        return
 
     # Start timing
     start = time.time()

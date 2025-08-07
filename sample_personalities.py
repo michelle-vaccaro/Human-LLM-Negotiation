@@ -15,15 +15,21 @@ models = ['o4-mini', 'o3', 'o3-mini', 'o1', 'gpt-4.1', 'gpt-4o', 'gpt-4.1-mini',
           'gemini-2.5-pro']
 prompted = [True, False]
 # prompted = [False]
-warmth_scores = [-100, 50, 0, 50, 100]
-dominance_scores = [-100, 50, 0, 50, 100]
-n_iter = 1
+warmth_scores = [-100, -50, 0, 50, 100]
+dominance_scores = [-100, -50, 0, 50, 100]
 
 # ===========================
 # FILE PATHS
 # ===========================
 prompt_file = 'prompts/personality_template.txt'
-sample_file = f'samples/samples_n{n_iter}.csv'
+
+# Determine filename based on prompted setting
+if True in prompted:
+    sample_file = f'samples/models_all_prompted.csv'
+    # sample_file = f'samples/models_claude_gemini_prompted.csv'
+else:
+    # sample_file = f'samples/models_all_unprompted.csv'
+    sample_file = f'samples/models_claude_gemini_unprompted.csv'
 
 # ===========================
 # MAIN SCRIPT
@@ -35,25 +41,24 @@ def create_personas(prompt_file, sample_file):
 
     # Sample from the space of possible persona
     personas = []
-    for _ in range(n_iter):
-        for value in prompted:
-            if value:
-                for model, warmth_score, dominance_score in product(models, warmth_scores, dominance_scores):
-                    prompt = prompt_template.format(warmth_score=warmth_score, dominance_score=dominance_score)
-                    personas.append({
-                        'model': model,
-                        'warmth_score': warmth_score,
-                        'dominance_score': dominance_score,
-                        'prompt': prompt
-                    })
-            else:
-                for model in models:
-                    personas.append({
-                        'model': model,
-                        'warmth_score': None,
-                        'dominance_score': None,
-                        'prompt': ''
-                    })
+    for value in prompted:
+        if value:
+            for model, warmth_score, dominance_score in product(models, warmth_scores, dominance_scores):
+                prompt = prompt_template.format(warmth_score=warmth_score, dominance_score=dominance_score)
+                personas.append({
+                    'model': model,
+                    'warmth_score': warmth_score,
+                    'dominance_score': dominance_score,
+                    'prompt': prompt
+                })
+        else:
+            for model in models:
+                personas.append({
+                    'model': model,
+                    'warmth_score': None,
+                    'dominance_score': None,
+                    'prompt': ''
+                })
 
     # Convert to DataFrame
     personas_df = pd.DataFrame(personas)

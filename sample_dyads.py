@@ -1,6 +1,5 @@
 import pandas as pd
 import itertools
-import argparse
 from pathlib import Path
 import random
 
@@ -129,22 +128,19 @@ def print_pairing_summary(pairings, agents):
 
 def main():
     """Main function."""
-    parser = argparse.ArgumentParser(description='Generate all possible agent pairings')
-    parser.add_argument('input_file', help='Path to CSV file containing agents')
-    parser.add_argument('--n_iter', type=int, default=1, help='Number of iterations for each pairing (default: 1)')
-    parser.add_argument('--output', help='Output CSV file path (default: samples/dyads_nX.csv)')
-    parser.add_argument('--shuffle', action='store_true', help='Shuffle the final list of pairings')
-    
-    args = parser.parse_args()
+    # Set arguments directly here
+    input_file = "samples/models_all_unprompted.csv"  # Change this as needed
+    n_iter = 1  # Change this as needed
+    shuffle = False  # Change this as needed
     
     # Check if input file exists
-    input_path = Path(args.input_file)
+    input_path = Path(input_file)
     if not input_path.exists():
         print(f"Error: Input file {input_path} not found!")
         return
     
     # Load agents
-    df = load_agents_from_csv(input_path)
+    df = load_agents_from_csv(input_file)
     agents = df['model'].dropna().unique().tolist()
     
     if len(agents) < 2:
@@ -152,18 +148,21 @@ def main():
         return
     
     # Generate pairings (only permutations with self-pairs included)
-    pairings = generate_all_permutations(df, args.n_iter, include_self_pairs=True)
+    pairings = generate_all_permutations(df, n_iter, include_self_pairs=True)
     
     # Shuffle if requested
-    if args.shuffle:
+    if shuffle:
         random.shuffle(pairings)
         print("Pairings have been shuffled")
     
-    # Set output file path
-    if args.output:
-        output_file = args.output
+    # Set output file path based on input file name
+    input_stem = Path(input_file).stem  # e.g., "models_all_prompted"
+    if input_stem.startswith("models_"):
+        output_stem = input_stem.replace("models_", "dyads_")  # e.g., "dyads_all_prompted"
     else:
-        output_file = f"samples/dyads_n{args.n_iter}.csv"
+        output_stem = f"dyads_{input_stem}"  # fallback
+    
+    output_file = f"samples/{output_stem}_{n_iter}.csv"
     
     # Save pairings
     save_pairings_to_csv(pairings, output_file)
@@ -174,10 +173,10 @@ def main():
     # Print some statistics
     print(f"\nStatistics:")
     print(f"  Pairing type: permutations")
-    print(f"  Iterations per pair: {args.n_iter}")
+    print(f"  Iterations per pair: {n_iter}")
     print(f"  Self-pairs included: True")
     
-    expected_pairs = len(agents) * len(agents) * args.n_iter
+    expected_pairs = len(agents) * len(agents) * n_iter
     print(f"  Expected pairs: {expected_pairs}")
 
 if __name__ == "__main__":
